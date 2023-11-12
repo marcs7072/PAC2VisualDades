@@ -1,0 +1,231 @@
+---
+title: 'Visualització de dades: PAC 2'
+author: "Autor: Marc López"
+date: "Novembre 2023"
+output:
+  html_document:
+    highlight: default
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_depth: 2
+    includes:
+      in_header: PEC-header.html
+  word_document: default
+  pdf_document:
+    highlight: zenburn
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Packages
+if (!require('ggplot2')) install.packages('ggplot2'); library('ggplot2')
+if (!require('VIM')) install.packages('VIM'); library('VIM')
+if (!require('dplyr')) install.packages('dplyr'); library('dplyr')
+if (!require('stringr')) install.packages('stringr'); library('stringr')
+if (!require('echarts4r')) install.packages('echarts4r'); library('echarts4r')
+if (!require('latticeExtra')) install.packages('latticeExtra'); library('latticeExtra')
+```
+
+------------------------------------------------------------------------
+
+# Pie chart
+
+Dataset taken from: <https://zenodo.org/records/5898311#.Y9Y2K9JBwUE>
+
+```{r}
+best_selling_vg <- read.csv("vgsales.csv")
+top100 <- best_selling_vg[best_selling_vg$Rank <= 100, ]
+```
+
+```{r}
+# Pie chart
+count(top100, Genre) %>% 
+  e_charts(x = Genre) %>% 
+  e_pie(n, legend = FALSE, name = "Genre") %>% 
+  e_tooltip() %>% 
+  e_title("Most popular genres by nº of appearences", "Top 100 best selling games of all time")
+```
+
+```{r}
+
+# We group the sales by the publisher
+sales_by_publisher <- best_selling_vg %>%
+  group_by(Publisher) %>%
+  summarise(total_sales = sum(Global_Sales, na.rm = TRUE))
+
+# We put it in descendant order
+sales_by_publisher <- sales_by_publisher %>%
+  arrange(desc(total_sales))
+
+# From row 21 onwards the Publisher is changed and grouped by "Others"
+sales_by_publisher$Publisher[21:nrow(sales_by_publisher)] <- "Others"
+sales_by_publisher <- sales_by_publisher %>%
+  group_by(Publisher) %>%
+  summarise(total_sales = sum(total_sales, na.rm = TRUE)) %>%
+  arrange(desc(total_sales)) 
+
+# We move the register the row with Publisher "Others" to the end
+sales_by_publisher <- sales_by_publisher %>%
+  arrange(Publisher != "Others")
+
+# Pie chart
+pie <- sales_by_publisher %>% 
+  e_charts(x = Publisher) %>% 
+  e_pie(total_sales, legend = FALSE, name = "Sales [millions]") %>% 
+  e_tooltip() %>% 
+  e_title("Publishers by sales")
+pie
+```
+
+# Stream chart
+
+Dataset taken from: <https://www.gapminder.org/data/>
+
+Original dataset source: <https://data.worldbank.org/indicator/MS.MIL.MPRT.KD?end=2022&start=2022&view=bar>
+
+```{r}
+arms_import <- read.csv("arms_imports_us_inflation_adjusted.csv")
+original_arms_import <- arms_import
+colnames(arms_import) <- gsub("X", "", colnames(arms_import))
+
+# We keep the data in millions (removing the M) and we also convert the data in billions to millions
+arms_import <- arms_import %>% 
+  mutate_at(vars(-country), function(x) {
+    ifelse(str_detect(x, "M"), as.numeric(sub("M", "", x)),
+    ifelse(str_detect(x, "B"), as.numeric(sub("B", "", x)) * 1000, as.numeric(x)))
+  })
+
+# Transpose with thee first column (country) as header of the columns
+transposed_arms_import <-as.data.frame(t(arms_import))
+colnames(transposed_arms_import) <- transposed_arms_import[1, ]
+transposed_arms_import <- transposed_arms_import[-1, ]
+
+# The warning is converting the cells containing 0 to NA
+```
+
+```{r}
+# We generate a sequence of years from 1960 to 2020 and we add it to the df as the first column
+dates_years <- seq.Date(as.Date("1960-01-01"), as.Date("2020-01-01"), by = "years")
+transposed_arms_import <- cbind(Year = dates_years, transposed_arms_import)
+
+# Stream chart
+transposed_arms_import |> 
+  e_charts(Year) |> 
+  e_river(UK) |> 
+  e_river(France) |> 
+  e_river(Italy) |> 
+  e_river(Spain) |> 
+  e_river(Germany) |> 
+  e_tooltip(trigger = "axis") |> 
+  e_title("Stream chart", "Arms imports [$ adjusted by inflation]")
+```
+
+# Horizon graph
+
+Dataset taken from:
+
+-   <https://es.finance.yahoo.com/quote/SAN.MC/history>
+
+-   <https://es.finance.yahoo.com/quote/TEF.MC/history>
+
+-   <https://es.finance.yahoo.com/quote/REP.MC/history>
+
+Filter parameters: [5 years to YTD (11/11/23), weekly]
+
+Website followed to make the horizon graph: <https://www.r-bloggers.com/2022/03/what-is-a-horizon-chart/>
+
+```{r}
+Telefonica <- read.csv("TEF_yahoo_export.csv")
+Telefonica$Date <- as.Date(Telefonica$Date)
+
+# Find the year of the first date in Date
+start_year <- as.numeric(format(Telefonica$Date[1], "%Y"))
+
+# We convert the df to time series
+ts_Telefonica <- ts(Telefonica$Open, start = start_year, frequency = 48)
+```
+
+```{r}
+# Line plot
+plot(ts_Telefonica, ylab = "Opening price [€]", main = "Telefonica (Nov. 2018 - Nov. 2023)")
+```
+
+```{r}
+# Scale of the plot
+zero_line <- 5
+scale <- 1
+
+# Colour segmented area plot
+xyplot(ts_Telefonica,
+       panel = function(x, y, ...) {
+         col <-
+           c("#B41414","#E03231","#F7A99C","#9FC8DC","#468CC8","#0165B3")
+         for (i in c(-3:-1, 2:0)) {
+           if (i >= 0)
+             yi <- pmax(zero_line, pmin(y, zero_line + scale * (i+1)))
+           if (i < 0)
+             yi <- pmin(zero_line, pmax(y, zero_line + scale * i))
+           panel.xyarea(x, yi, origin = zero_line,
+                        col = col[i+4], border = NA)
+         }
+         panel.lines(x, y, col = "black")
+         panel.abline(h = zero_line, lty = 2)
+       },
+       ylab = "Opening price [€]",
+       main = "Telefonica (Nov. 2018 - Nov. 2023)")
+```
+
+```{r, fig.height = 3}
+horizonplot(ts_Telefonica, colorkey = TRUE,
+            origin = 5, horizonscale = 1,
+            col.regions = c("#B41414","#E03231","#F7A99C","#9FC8DC",
+                            "#468CC8","#0165B3"),
+            main = "Telefonica (Nov. 2018 - Nov. 2023)")
+```
+
+En cas de voler veure vàries empreses a la vegada:
+
+```{r}
+Repsol <- read.csv("REP_yahoo_export.csv")
+Repsol$Date <- as.Date(Repsol$Date)
+ts_Repsol <- ts(Repsol$Open, start = start_year, frequency = 48)
+
+Santander <- read.csv("SAN_yahoo_export.csv")
+Santander$Date <- as.Date(Santander$Date)
+ts_Santander <- ts(Santander$Open, start = start_year, frequency = 48)
+
+# merge time series 
+combined_df <- data.frame(
+  Santander = ts_Santander,
+  Repsol = ts_Repsol,
+  Telefonica = ts_Telefonica
+)
+
+# Convert the data frame to a time series
+merged_ts <- ts(combined_df, start = start(ts_Santander), frequency = frequency(ts_Santander))
+
+plot(merged_ts, main = "Opening prices IBEX35")
+```
+
+```{r, fig.height = 3}
+# These layers show scale and origin in each panel
+infolayers <-
+  layer(panel.scaleArrow(x = 0.99, digits = 1, col = "grey",
+                         srt = 90, cex = 0.7)) +
+  layer(lim <- current.panel.limits(),
+        panel.text(lim$x[1], lim$y[1], round(lim$y[1],1), font = 2,
+                   cex = 0.7, adj = c(-0.5,-0.5), col = "#9FC8DC"))
+
+# Multiple rows horizon chart
+horizonplot(merged_ts, colorkey = TRUE,
+            col.regions = c("#B41414","#E03231","#F7A99C","#9FC8DC",
+                            "#468CC8","#0165B3"),
+            origin = 8, horizonscale = 2.5,
+            main = "Opening prices IBEX35") + infolayers
+```
